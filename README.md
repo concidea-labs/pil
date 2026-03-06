@@ -168,4 +168,4 @@ Those are prose. PIL is structured.
 
 MIT — the language belongs to everyone.
 
-Built by [concidea.labs](https://concidea.de) · Vienna · [labs@concidea.de](mailto:labs@concidea.de)
+Built by [concidea.labs](https://concidea.de) · Vienna/Munich · [labs@concidea.de](mailto:labs@concidea.de)
