@@ -1,0 +1,531 @@
+(* ============================================================ *)
+(* PIL - PENTACLE Internal Language                             *)
+(* Formal Grammar in EBNF (ISO 14977)                          *)
+(* Stand: Februar 2026                                         *)
+(* ============================================================ *)
+
+(* ------------------------------------------------------------ *)
+(* WHITESPACE                                                   *)
+(* ------------------------------------------------------------ *)
+
+(* Whitespace (spaces, tabs) between tokens is implicitly       *)
+(* allowed and ignored everywhere except within string literals *)
+(* and NEWLINE tokens. Parsers should skip whitespace by        *)
+(* default between any two terminals or non-terminals.          *)
+(*                                                              *)
+(* Compound tokens are atomic - no internal whitespace allowed: *)
+(*   not:  no:  action:set  never:combine                      *)
+(* These are single lexer tokens, NOT identifier + ":".         *)
+
+
+(* ------------------------------------------------------------ *)
+(* TOP LEVEL                                                    *)
+(* ------------------------------------------------------------ *)
+
+program         = [ uses_stmt ] , { statement | comment } ;
+
+(* uses_stmt MUSS erste Zeile sein wenn vorhanden              *)
+(* deklariert welche PILins dieses Dokument benötigt           *)
+uses_stmt       = "uses" , ":" , set_value , NEWLINE ;
+(* Semantik:                                                   *)
+(*   deklariert -> PILin sofort geladen, ERROR wenn nicht da  *)
+(*   nicht dekl. -> Auto-Detection via Trigger, graceful degr. *)
+
+(* DISAMBIGUATION: most statements have unique leading keywords. *)
+(* declaration vs scope_block both start with ref:               *)
+(*   ref + ":" -> declaration,  ref + "{" -> scope_block         *)
+statement       = ( declaration
+                  | rule_stmt
+                  | constraint_stmt
+                  | goal_stmt
+                  | goals_block
+                  | profile_stmt
+                  | plugin_stmt
+                  | context_stmt
+                  | module_stmt
+                  | skill_stmt
+                  | rule_block
+                  | endpoint_stmt
+                  | scope_block
+                  | annotation_stmt
+                  | set_quantifier
+                  ) , NEWLINE ;
+
+
+(* ------------------------------------------------------------ *)
+(* COMMENTS                                                     *)
+(* ------------------------------------------------------------ *)
+
+comment         = "#" , [ comment_tag ] , { any_char } , NEWLINE ;
+
+comment_tag     = "!" | "?" | ">" | "~" | ( identifier , ":" ) ;
+(* Core:   comment_tag wird ignoriert - gesamter comment ignoriert *)
+(* PILin:  structured-comments interpretiert tags mit Bedeutung   *)
+(*   !  -> deprecated                                             *)
+(*   ?  -> open question                                          *)
+(*   >  -> source reference                                       *)
+(*   ~  -> todo                                                   *)
+(*   identifier ":"  -> named namespace, z.B. src: todo: fix:    *)
+(* Graceful degradation: unbekannte tags = silent ignore          *)
+
+(* Zwei Comment-Typen:                                            *)
+(* ##  Sektions-Kommentar - strukturelle Gliederung               *)
+(*     Nicht als eigene Grammatik-Produktion - "## Titel" wird   *)
+(*     als normaler comment geparst (Text: "# Titel").           *)
+(*     Erkennung erfolgt auf Tool-Ebene (pil_compress etc.)      *)
+(* #   Zeilen-Kommentar   - wird vollstaendig ignoriert           *)
+
+
+(* ------------------------------------------------------------ *)
+(* DECLARATIONS - entity.attribute: value                       *)
+(* ------------------------------------------------------------ *)
+
+declaration     = ref , ":" , value_list ;
+
+ref             = identifier , { "." , identifier } ;
+
+(* typed_ref: Prefix-Notation fuer Kontext-Referenzen: ctx:name *)
+typed_ref       = ref_prefix , ":" , identifier ;
+
+(* any_ref: vollstaendiger Referenz-Typ fuer alle Kontexte      *)
+any_ref         = typed_ref | ref ;
+
+value_list      = value , { "," , value } ;
+
+(* DISAMBIGUATION: ordered-choice priority:                     *)
+(*   function_call first (identifier + "(")                     *)
+(*   range_value next   (number + ".." lookahead)               *)
+(*   negated_value next (starts with "not:" / "no:" / "!")      *)
+(*   then any_ref (typed_ref: prefix ":" id, or ref: id "." ..)*)
+(*   then literal (atom last, as identifier matches ref too)    *)
+(*   set_value last (starts with "[")                           *)
+value           = function_call
+                | range_value
+                | negated_value
+                | any_ref
+                | literal
+                | set_value ;
+
+negated_value   = "not:" , ( atom | string )
+                | "no:"  , ( atom | string )
+                | "!"    , ( atom | string ) ;
+
+(* DISAMBIGUATION: Lexer uses maximal munch for range_value.    *)
+(* "1.5..2.5" -> number ".." number, never "1" "." "." "2" "5" *)
+range_value     = number , ".." , number ;
+
+set_value       = "[" , value_list , "]" ;
+
+
+(* ------------------------------------------------------------ *)
+(* LITERALS                                                     *)
+(* ------------------------------------------------------------ *)
+
+(* DISAMBIGUATION: ordered-choice priority in literal:          *)
+(* iso_date first: 4 digits + "-" is unambiguous               *)
+(* iso_time next:  2 digits + ":" is unambiguous               *)
+(* duration before number: number alone would consume "08"      *)
+(*   leaving ":30" unconsumed if iso_time were tried after      *)
+(* atom last: identifier overlaps with ref - ref wins in value  *)
+literal         = iso_date
+                | iso_time
+                | duration
+                | number
+                | string
+                | atom
+                | boolean
+                | wildcard
+                | uuid ;
+
+string          = '"' , { any_char } , '"' ;
+
+(* atom: unquoted symbolic value, not a ref                     *)
+(* e.g. done, advisory, always_on, hard                         *)
+(* DISAMBIGUATION: atom = identifier, same as start of ref.     *)
+(* Use ref when "." follows; atom otherwise. ref > atom.        *)
+atom            = identifier ;
+
+numeric         = [ "-" ] , digit , { digit } , [ "." , digit , { digit } ] ;
+number          = numeric , [ "EUR" | "PCT" ] ;
+
+boolean         = "true" | "false" ;
+
+duration        = number , time_unit ;
+time_unit       = "ms" | "s" | "min" | "h" | "d" | "w" ;
+
+iso_time        = digit , digit , ":" , digit , digit ;
+
+(* ISO 8601 date: YYYY-MM-DD, written out per EBNF ISO 14977   *)
+iso_date        = digit , digit , digit , digit ,
+                  "-" ,
+                  digit , digit ,
+                  "-" ,
+                  digit , digit ;
+
+wildcard        = ( string | atom ) , "*"
+                | "*" ;
+
+(* UUID: 8-4-4-4-12 hex digit groups                           *)
+uuid            = hex , hex , hex , hex , hex , hex , hex , hex ,
+                  "-" ,
+                  hex , hex , hex , hex ,
+                  "-" ,
+                  hex , hex , hex , hex ,
+                  "-" ,
+                  hex , hex , hex , hex ,
+                  "-" ,
+                  hex , hex , hex , hex ,
+                  hex , hex , hex , hex ,
+                  hex , hex , hex , hex ;
+
+
+(* ------------------------------------------------------------ *)
+(* EXPRESSIONS                                                  *)
+(* ------------------------------------------------------------ *)
+
+expression      = or_expr ;
+
+(* Precedence (weakest to strongest): OR < XOR < AND < NOT     *)
+(* Example: A AND B XOR C  =>  (A AND B) XOR C                 *)
+or_expr         = xor_expr , { "OR"  , xor_expr } ;
+
+xor_expr        = and_expr , { "XOR" , and_expr } ;
+
+and_expr        = not_expr , { "AND" , not_expr } ;
+
+not_expr        = "NOT" , primary_expr
+                | primary_expr ;
+
+(* DISAMBIGUATION: ordered-choice priority:                     *)
+(*   comparison    first (any_ref + cmp_op)                     *)
+(*   set_test      next  (any_ref + "IN" / "NOT" "IN")          *)
+(*   function_call next  (identifier + "(")                     *)
+(*   boolean       next  (reserved keyword, not an identifier)  *)
+(*   any_ref       last  (bare reference)                       *)
+primary_expr    = "(" , expression , ")"
+                | comparison
+                | set_test
+                | function_call
+                | boolean
+                | any_ref ;
+
+comparison      = any_ref , cmp_op , value ;
+
+cmp_op          = "==" | "!=" | ">" | "<" | ">=" | "<=" | "~=" ;
+
+set_test        = any_ref , "IN"  , set_value
+                | any_ref , "NOT" , "IN" , set_value ;
+
+
+(* ------------------------------------------------------------ *)
+(* RULE STATEMENT - trigger -> action                          *)
+(* ------------------------------------------------------------ *)
+
+rule_stmt       = trigger , "->" , action_expr , { annotation } ;
+
+(* DISAMBIGUATION: trigger lookahead after ref:                 *)
+(*   AT / EVERY / WITHIN / UNTIL / AFTER -> temporal_expr       *)
+(*   anything else -> expression                                *)
+trigger         = temporal_expr
+                | expression ;
+
+(* pipeline_expr covers single function_call (one action_step) *)
+(* and multi-step pipelines. "!" applies to the whole expr.    *)
+action_expr     = pipeline_expr , [ "!" ]
+                | ternary_expr
+                | null_coalesce ;
+
+pipeline_expr   = action_step , { "|>" , action_step } ;
+
+(* NOTE: module_call is only reachable via action_step.         *)
+(* Add to primary_expr if module::fn() needed as a value.       *)
+action_step     = module_call | function_call | ref ;
+
+ternary_expr    = expression , "?" , action_expr , ":" , action_expr ;
+
+null_coalesce   = ref , "??" , value ;
+
+
+(* ------------------------------------------------------------ *)
+(* TEMPORAL OPERATORS                                           *)
+(* ------------------------------------------------------------ *)
+
+(* temporal_base: atomic, no recursion                          *)
+temporal_base   = ref , "AT"     , iso_time
+                | ref , "EVERY"  , duration , [ temporal_except ]
+                | ref , "WITHIN" , duration
+                | ref , "UNTIL"  , expression
+                | ref , "AFTER"  , ref ;
+
+(* THEN chains temporal_base sequentially, no left-recursion    *)
+temporal_expr   = temporal_base , { "THEN" , temporal_base } ;
+
+temporal_except = "," , "NOT" , "IN" , set_value ;
+
+
+(* ------------------------------------------------------------ *)
+(* SET QUANTIFIERS                                              *)
+(* ------------------------------------------------------------ *)
+
+set_quantifier  = "ALL"  , set_value , "->" , action_expr
+                | "ANY"  , set_value , "->" , action_expr
+                | "NONE" , set_value , "->" , action_expr ;
+
+
+(* ------------------------------------------------------------ *)
+(* CONSTRAINT LEVELS                                           *)
+(* ------------------------------------------------------------ *)
+
+constraint_stmt = fixed_stmt
+                | bounded_stmt
+                | free_stmt ;
+
+fixed_stmt      = "FIXED" , ":" , fixed_body ;
+
+fixed_body      = never_clause
+                | always_clause
+                | ref , ":" , value_list ;
+
+never_clause    = "never"  , ":" , value_list ;
+always_clause   = "always" , ":" , value_list ;
+
+bounded_stmt    = "BOUNDED" , ":" , identifier , "{" , NEWLINE
+                    , bounded_body ,
+                  "}" ;
+
+bounded_body    = { bounded_field , NEWLINE } ;
+
+bounded_field   = "min"        , ":" , value
+                | "max"        , ":" , value
+                | "constraint" , ":" , expression
+                | "free"       , ":" , ( value | set_value ) ;
+
+goal_stmt       = "GOAL" , ":" , ref , "(" , expression , ")"
+                    , { annotation } ;
+
+free_stmt       = "FREE" , ":" , ( ref | set_value ) ;
+
+
+(* ------------------------------------------------------------ *)
+(* GOALS BLOCK & PROFILES                                       *)
+(* ------------------------------------------------------------ *)
+
+goals_block     = "goals" , ":" , identifier , "{" , NEWLINE
+                    , { goal_entry , NEWLINE } ,
+                  "}" ;
+
+(* annotation is optional, consistent with goal_stmt            *)
+goal_entry      = identifier , ":" , goal_stmt , [ annotation ] ;
+
+profile_stmt    = "profile" , ":" , identifier , "{" , NEWLINE
+                    , { profile_field , NEWLINE } ,
+                  "}" ;
+
+profile_field   = identifier , ":" , number ;
+
+
+(* ------------------------------------------------------------ *)
+(* ANNOTATIONS                                                  *)
+(* ------------------------------------------------------------ *)
+
+annotation      = "@" , identifier , [ "(" , value_list , ")" ] ;
+
+annotation_stmt = annotation ;
+
+(* built-in annotations:                                        *)
+(* @priority(1-10)   @weight(number)   @cost(value)            *)
+(* @timeout(duration) @retry(number)  @version(semver)         *)
+
+
+(* ------------------------------------------------------------ *)
+(* REFERENCES                                                   *)
+(* ------------------------------------------------------------ *)
+
+ref_prefix      = "ctx"
+                | "skill"
+                | "instance"
+                | "src"
+                | "dst"
+                | "rule"
+                | "profile" ;
+
+
+(* ------------------------------------------------------------ *)
+(* FUNCTION & MODULE CALLS                                      *)
+(* ------------------------------------------------------------ *)
+
+function_call   = identifier , "(" , [ arg_list ] , ")" ;
+
+module_call     = identifier , "::" , identifier , "(" , [ arg_list ] , ")" ;
+
+arg_list        = arg , { "," , arg } ;
+
+arg             = value | ( identifier , ":" , value ) ;
+
+
+(* ------------------------------------------------------------ *)
+(* BLOCKS - plugin, context, module                            *)
+(* ------------------------------------------------------------ *)
+
+plugin_stmt     = "plugin" , ":" , identifier , "{" , NEWLINE
+                    , { plugin_field , NEWLINE } ,
+                  "}" ;
+
+plugin_field    = "version"      , ":" , semver
+                | "extends"      , ":" , identifier , ">=" , semver
+                | "adds_syntax"  , ":" , set_value
+                | "adds_tools"   , ":" , set_value
+                | "load"         , ":" , load_mode
+                | "triggers"     , ":" , set_value ;
+
+load_mode       = "always" | "on_demand" | "always_on" ;
+
+context_stmt    = "context" , ":" , identifier , "{" , NEWLINE
+                    , { context_field , NEWLINE } ,
+                  "}" ;
+
+context_field   = "enforcement"  , ":" , enforcement_level
+                | "plugins"      , ":" , set_value
+                | "load"         , ":" , load_mode
+                | "fixed"        , ":" , set_value
+                | "goal"         , ":" , identifier
+                | "free"         , ":" , set_value ;
+
+enforcement_level = "advisory" | "hard" ;
+
+module_stmt     = "module" , ":" , identifier , "{" , NEWLINE
+                    , { module_field , NEWLINE } ,
+                  "}" ;
+
+module_field    = "version"      , ":" , semver
+                | "plugin"       , ":" , identifier
+                | "extends"      , ":" , identifier
+                | "target"       , ":" , set_value
+                | "load"         , ":" , load_mode
+                | "requires"     , ":" , set_value
+                | "exposes"      , ":" , set_value
+                | "never"        , ":" , set_value
+                | "side_effects" , ":" , set_value
+                | "cost"         , ":" , value
+                | "instance"     , ":" , instance_mode ;
+
+instance_mode   = "always_on"
+                | "on_demand"
+                | "cron" , "(" , string , ")" ;
+
+
+(* ------------------------------------------------------------ *)
+(* SKILL HEADER                                                 *)
+(* ------------------------------------------------------------ *)
+
+(* skill_stmt uses braces like all other blocks to allow        *)
+(* unambiguous detection of block end by the parser             *)
+skill_stmt      = "skill" , ":" , identifier , "{" , NEWLINE
+                    , { skill_field , NEWLINE } ,
+                  "}" ;
+
+skill_field     = "version"      , ":" , semver
+                | "requires"     , ":" , set_value
+                | "exposes"      , ":" , set_value
+                | "never"        , ":" , set_value
+                | "cost"         , ":" , value
+                | "side_effects" , ":" , set_value
+                | "instance"     , ":" , instance_mode ;
+
+
+(* ------------------------------------------------------------ *)
+(* RULE BLOCK                                                   *)
+(* ------------------------------------------------------------ *)
+
+rule_block      = "rule" , ":" , identifier , "{" , NEWLINE
+                    , { rule_field , NEWLINE } ,
+                  "}" ;
+
+rule_field      = "condition"     , ":" , expression
+                | "action:set"    , ref , mut_op , value
+                | "return"        , ":" , value
+                | "priority"      , ":" , number
+                | "never:combine" , "WITH" , typed_ref
+                | "combine"       , "WITH" , typed_ref
+                | "except"        , ":" , expression ;
+
+mut_op          = "=" | "+=" | "-=" | "*=" | "/=" ;
+
+
+(* ------------------------------------------------------------ *)
+(* ENDPOINT BLOCK                                               *)
+(* ------------------------------------------------------------ *)
+
+endpoint_stmt   = "endpoint" , ":" , identifier , "{" , NEWLINE
+                    , { endpoint_field , NEWLINE } ,
+                  "}" ;
+
+endpoint_field  = "method"       , ":" , http_method
+                | "input"        , ":" , type_obj
+                | "output"       , ":" , type_obj
+                | "side_effects" , ":" , set_value
+                | "timeout"      , ":" , duration
+                | "never"        , ":" , set_value
+                | "errors"       , ":" , error_block ;
+
+http_method     = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" ;
+
+type_obj        = "{" , { type_field , [ "," ] } , "}" ;
+
+type_field      = identifier , [ "?" ] , ":" , type_expr ;
+
+(* type_base + optional suffix avoids left-recursion            *)
+type_base       = "str" | "int" | "float" | "bool" | "uuid"
+                | "iso8601" | "timestamp"
+                | "IN" , set_value
+                | type_obj ;
+
+type_expr       = type_base , [ "(" , value , ")" ] ;
+
+error_block     = "{" , NEWLINE
+                    , { error_entry , NEWLINE } ,
+                  "}" ;
+
+error_entry     = ( number , ":" , identifier ) , "->" , type_obj ;
+
+
+(* ------------------------------------------------------------ *)
+(* SCOPE BLOCK - compact inline entity grouping                *)
+(* ------------------------------------------------------------ *)
+
+(* Uses comma separation (not newlines) - intentionally dense.  *)
+(* Example: alex{style:direct, no:smalltalk}                    *)
+scope_block     = ref , "{" , scope_body , "}" ;
+
+scope_body      = scope_entry , { "," , scope_entry } ;
+
+scope_entry     = identifier , ":" , value
+                | negated_value ;
+
+
+(* ------------------------------------------------------------ *)
+(* LEXICAL                                                      *)
+(* ------------------------------------------------------------ *)
+
+(* Reserved keywords - lexer emits keyword tokens, not identifier. *)
+(* These MUST NOT be used as identifier names:                     *)
+(*   true false                                                    *)
+(*   NOT AND OR XOR IN                                             *)
+(*   ALL ANY NONE                                                  *)
+(*   AT EVERY WITHIN UNTIL AFTER THEN WITH                         *)
+(*   FIXED BOUNDED FREE GOAL                                       *)
+
+identifier      = letter , { letter | digit | "_" | "-" } ;
+
+semver          = digit , { digit } , "." , digit , { digit }
+                    , [ "." , digit , { digit } ] ;
+
+letter          = "a" .. "z" | "A" .. "Z" ;
+digit           = "0" .. "9" ;
+hex             = digit | "a" .. "f" | "A" .. "F" ;
+any_char        = ? any unicode character except NEWLINE ? ;
+NEWLINE         = "\n" | "\r\n" ;
+
+(* ============================================================ *)
+(* END OF GRAMMAR                                               *)
+(* ============================================================ *)
