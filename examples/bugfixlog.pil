@@ -1,0 +1,17 @@
+# BUGFIXLOG
+# project: my-go-api
+# lang: go
+# format: pil
+# pattern: YYYY-MM-DD: component (severity) — symptom | cause | fix
+# severity: critical | high | medium | low
+# maintained-by: AI — document root cause NOT just symptom, append only
+# viewer: open pil-viewer.html in browser (drag this file onto it)
+
+## 2026-03-02
+
+2026-03-02: internal/auth/middleware.go (high) — valid tokens rejected with 401 | expiry check used time.Now() without UTC, server timezone offset caused false negatives | normalize to time.Now().UTC() in token validation
+
+## 2026-03-03
+
+2026-03-03: migrations/00001_auth.sql (medium) — migration fails on fresh database | missing IF NOT EXISTS on index creation, breaks idempotent re-runs | add IF NOT EXISTS to all CREATE INDEX statements
+2026-03-03: main.go (low) — graceful shutdown ignores active connections | context.Background() passed to server.Shutdown(), no timeout | replace with context.WithTimeout(ctx, 10s)
