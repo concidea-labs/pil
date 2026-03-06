@@ -1,0 +1,328 @@
+# pil-setup.pil
+# format: pil
+# version: 1.0
+# author: concidea.labs
+# url: https://github.com/concidea/pil
+#
+# USAGE: Drop this file into Claude Desktop, Cursor, or Windsurf.
+#        The AI will ask two questions, then build your entire project scaffold.
+#        This prompt is written in PIL — the language it teaches you.
+
+## ============================
+# PIL QUICKREF (embedded — self-contained, no prior knowledge needed)
+#
+# PIL = PENTACLE Internal Language — Steno for LLMs
+# Lossless context compression. English only. One concept per line. No prose.
+#
+# CORE SYNTAX
+#   entity.attribute: value          property or state
+#   entity.attribute: v1, v2, v3    multiple values (comma-separated)
+#   trigger -> action                if-then rule (async)
+#   trigger -> action!               if-then rule (blocking / synchronous)
+#   a |> b |> c                      pipeline: output of a is input of b
+#   condition ? a : b                ternary: if condition then a else b
+#   value ?? fallback                null-coalesce: if no value, use fallback
+#   module::function(args)           call a specific function
+#
+# BOOLEAN     A AND B -> x   |   A OR B -> x   |   NOT A -> x   |   A XOR B -> x
+# COMPARE     == != > < >= <=   |   name ~= "pattern*"  (wildcard)
+# TEMPORAL    AT 07:00 | EVERY 30min | WITHIN 30min | UNTIL cond | a THEN b | a AFTER b
+# SETS        IN [a,b,c] | NOT IN [a,b,c] | ALL [..] -> done | ANY [..] -> alert | NONE [..]
+# ANNOTATIONS @priority(1-5) | @cost(x) | @timeout(xmin) | @retry(n)
+# REFERENCES  ctx:name | skill:name | instance:name | src:name | dst:name
+#
+# CONSTRAINT LEVELS
+#   FIXED:   never: x                 absolute — never overrideable, treat like a failing test
+#   BOUNDED: name { min: x, max: y }  range with hard limits
+#   GOAL:    target(expr) @weight(n)  soft goal
+#   FREE:    ref                      LLM decides
+#
+# SESSION KEYS (standard — use consistently across all PIL files)
+#   decided: X NOT Y      chose X, rejected Y — never reopen this decision
+#   decided: X FOR scope  tool/tech choice with context
+#   never: action IN ctx  hard constraint
+#   pattern: t -> r       recurring pattern worth remembering
+#   learned: what / why   institutional memory — what worked, what didn't
+#   status: X (state)     done | in-progress | blocked
+#   open: question        unresolved — needs attention
+#   produced: file (desc) output artifact created this session
+#
+# HOW TO WRITE PIL
+#   "we decided to use X instead of Y"      ->  decided: X NOT Y
+#   "never do X in context Y"               ->  never: X IN Y
+#   "task Z is finished"                    ->  status: Z (done)
+#   "we noticed X works better when Y"      ->  learned: X when Y
+#   compress lists with commas, not bullets
+#   one line = one fact — no explanations inline
+#
+# HOW TO READ PIL
+#   decided: X NOT Y   = chose X, rejected Y, don't reopen
+#   never: X IN Y      = hard constraint, treat like a test that must pass
+#   open: X            = unresolved, may need attention
+#   status: X (done)   = completed, no further action needed
+## ============================
+
+## YOUR TASK AS AI
+
+# You are setting up a new software project with full PIL tooling.
+# PIL is the context format — CLAUDE.pil is the AI memory file,
+# changelog.pil and bugfixlog.pil are the living project logs,
+# and pil-viewer.html is a zero-dependency browser tool to read them.
+
+task: scaffold_pil_project
+persona: expert_engineer, no:padding, no:preamble
+never: ask_more_than_2_questions_upfront
+never: create_placeholder_code (everything must run as-is)
+never: skip_changelog_entry (one entry per logical change)
+never: bulk_summarize_changelog (granular, one fact per line)
+
+## STEP 1 — ASK (exactly these two questions, nothing more)
+
+ask.q1: "Project name?"
+ask.q2: "Language? [go / rust]"
+
+# After answers: proceed immediately, no further questions.
+# Infer everything else from context (editor from environment, OS from paths, etc.)
+
+## STEP 2 — CREATE FILES (in this exact order)
+
+# ── FILE 1: CLAUDE.pil ──────────────────────────────────────────────────────
+# The AI memory and rule file. Lives at project root.
+# Cursor reads it as context. Claude Desktop uses it as system memory.
+# Structure: header → embedded quickref → separator → rules → live session log
+
+create: CLAUDE.pil
+CLAUDE.pil.content: """
+# CLAUDE.pil
+# project: {PROJECT_NAME}
+# lang: {LANG}
+# created: {TODAY_ISO}
+# format: pil
+# maintained-by: AI (append decisions, patterns, learned after each session)
+# source: concidea.labs PIL — https://github.com/concidea/pil
+
+## ============================
+[EMBED FULL PIL QUICKREF HERE — verbatim from above, so this file is self-contained]
+## ============================
+
+## PROJECT
+
+project.name: {PROJECT_NAME}
+project.lang: {LANG}
+project.created: {TODAY_ISO}
+
+## AI BEHAVIOR — ALWAYS ACTIVE
+
+ai.docs: pil UNLESS user-explicitly-requests-other-format
+ai.maintain: [changelog.pil, bugfixlog.pil]
+ai.style: direct, no:padding, no:preamble, no:obvious_comments
+ai.code: always_runnable, never:placeholder_comments, never:todo_without_ticket
+ai.response: prose NOT bullets, except:code_and_lists
+
+# Lifecycle rules
+code.change  -> append(changelog.pil)!
+bug.fix      -> append(bugfixlog.pil)! THEN (systemic? -> append(CLAUDE.pil, section:learned))
+session.end  -> pil_compress(decisions+patterns+learned) |> append(CLAUDE.pil)
+
+## LANGUAGE RULES — GO
+[include only if lang == go, remove section if lang == rust]
+
+never: init() FOR side_effects
+never: panic() IN library_code
+never: naked_return IN functions_over_5_lines
+never: global_state EXCEPT config_and_logger
+pattern: error -> return (nil, err) NOT log_and_continue
+pattern: context -> first_param IN all_public_functions
+pattern: interface -> accept IN params, return_concrete IN constructors
+decided: go_modules NOT gopath
+format: gofmt, required
+test: table_driven, required FOR business_logic
+
+## LANGUAGE RULES — RUST
+[include only if lang == rust, remove section if lang == go]
+
+never: unwrap() IN production_path
+never: unwrap() WITHOUT comment(why_safe)
+never: clone() WITHOUT reason_comment
+never: unsafe WITHOUT safety_comment_explaining_invariants
+pattern: error -> Result<T, E> NOT panic
+pattern: prefer_owned_types OVER lifetime_complexity IN public_api
+decided: cargo NOT manual_build
+decided: thiserror FOR error_types NOT manual_Display_impl
+format: rustfmt, required
+test: unit_in_mod_tests + integration_in_tests_dir
+
+## DECISIONS
+# AI appends here — one line per architectural choice made during sessions
+# Format: decided: X NOT Y  or  decided: X FOR purpose
+
+## PATTERNS
+# AI appends recurring patterns discovered during development
+
+## LEARNED
+# AI appends systemic findings — especially bugs that reveal structural issues
+
+## OPEN
+# Unresolved questions — delete line when resolved
+"""
+
+# ── FILE 2: changelog.pil ───────────────────────────────────────────────────
+# Append-only. AI writes one entry per logical code change.
+# Single regex parses every line — grep, viewer, and LLMs all work without parser.
+
+create: changelog.pil
+changelog.pil.content: """
+# CHANGELOG
+# project: {PROJECT_NAME}
+# lang: {LANG}
+# format: pil
+# maintained-by: AI — append on every code change, one entry per logical change
+# viewer: open pil-viewer.html in browser (drag & drop this file)
+#
+# pattern: YYYY-MM-DD: component (change-type) — description
+# change-types: added | created | changed | fixed | removed | refactor | docs
+
+{TODAY_ISO}: CLAUDE.pil (created) — project scaffold, AI rules, PIL tooling
+{TODAY_ISO}: changelog.pil (created) — append-only change log
+{TODAY_ISO}: bugfixlog.pil (created) — append-only bug fix log
+{TODAY_ISO}: pil-viewer.html (created) — zero-dependency log browser with .pilhum generation
+"""
+
+# ── FILE 3: bugfixlog.pil ───────────────────────────────────────────────────
+# Three-field format enforces root cause documentation, not just symptoms.
+# AI must fill all three fields: symptom | cause | fix
+
+create: bugfixlog.pil
+bugfixlog.pil.content: """
+# BUGFIXLOG
+# project: {PROJECT_NAME}
+# lang: {LANG}
+# format: pil
+# maintained-by: AI — append on every bug fix, document root cause NOT just symptom
+# viewer: open pil-viewer.html in browser (drag & drop this file)
+#
+# pattern: YYYY-MM-DD: component (severity) — symptom | cause | fix
+# severity: critical | high | medium | low
+"""
+
+# ── FILE 4: pil-viewer.html ─────────────────────────────────────────────────
+# Single HTML file. No server. No npm. No build step.
+# Drag changelog.pil or bugfixlog.pil onto it — or use file picker.
+# Features: two tabs, filter by type/component/text, AI summary (.pilhum), download.
+# Generate .pilhum requires ANTHROPIC_API_KEY set in the input field on first use.
+
+create: pil-viewer.html
+pil-viewer.html.spec: """
+  DESIGN
+    dark terminal aesthetic (bg: #07090f), monospace font (JetBrains Mono via CDN)
+    scan-line overlay (CSS only, no JS)
+    no framework, no build, single self-contained file under 600 lines
+
+  LAYOUT
+    header: project title (parsed from file) + file picker button + API key badge
+    tabs: [changelog.pil] [bugfixlog.pil] — each with entry count badge
+    toolbar: [raw .pil | .pilhum] toggle + text filter + type chips + generate button
+    content: grouped by date, each entry as: [type-badge] [component] [description]
+    footer: total/filtered count + concidea.labs link
+
+  CHANGELOG ENTRY DISPLAY
+    parse pattern: YYYY-MM-DD: component (type) — description
+    type badge colors: added=#4ade80 created=#60a5fa changed=#facc15
+                       fixed=#f97316 removed=#ff5060 refactor=#c084fc docs=#7a9cbd
+    component color: .go=#4ade80 .rs=#f97316 .ts=#60a5fa .pil=#c084fc .sql=#facc15
+
+  BUGFIXLOG ENTRY DISPLAY
+    parse pattern: YYYY-MM-DD: component (severity) — symptom | cause | fix
+    severity badge colors: critical=#ff5060 high=#f97316 medium=#facc15 low=#7a9cbd
+    show three sub-lines: symptom / ↳ cause: ... / ↳ fix: ...
+
+  PILHUM GENERATION
+    button: "✦ generate .pilhum" — calls Anthropic API (claude-sonnet-4-20250514)
+    system prompt for changelog: transform PIL changelog into readable release summary
+                                  with narrative intro, "What's new", "Technical notes"
+    system prompt for bugfixlog: transform PIL bugfixlog into readable bug report
+                                  with stability overview, grouped issues, root cause patterns
+    API key: read from localStorage key "pil_anthropic_key" if set,
+             otherwise show inline input field on first generate attempt
+    on success: switch to .pilhum tab, show formatted result, enable download button
+    download: saves as {name}.pilhum with header comment (source, generated date)
+
+  FILE LOADING
+    drag & drop anywhere on page
+    file picker (top right)
+    paste textarea (shown when no file loaded, auto-detects changelog vs bugfixlog)
+    auto-detect: filename contains "bug" -> bugfixlog tab, otherwise -> changelog tab
+
+  INTERACTIONS
+    filter input: real-time filter across component + type/severity + description
+    type chips: click to toggle filter by that type (mutual exclusive with text filter)
+    clear button: appears when any filter active
+    all state: in-memory JS only (no localStorage except API key)
+"""
+
+## STEP 3 — SCAFFOLD PROJECT STRUCTURE
+
+# Create minimal runnable project skeleton after the PIL files.
+# No placeholder comments. Everything must compile and run.
+
+scaffold.go: """
+  go.mod (module {PROJECT_NAME}, go 1.22)
+  main.go (minimal HTTP server OR CLI skeleton, your call based on project name)
+  .gitignore (Go standard)
+"""
+
+scaffold.rust: """
+  Cargo.toml (name={project_name}, edition=2021)
+  src/main.rs (minimal runnable binary, no unwrap in main path)
+  .gitignore (Rust standard)
+"""
+
+## STEP 4 — EDITOR CONFIG (detect from environment)
+
+# If Cursor or VSCode detected:
+create.if_cursor_or_vscode: .vscode/settings.json
+settings.json.content: """
+{
+  "files.associations": { "*.pil": "plaintext", "*.pilhum": "markdown" },
+  "editor.wordWrap": "on",
+  "[plaintext]": { "editor.rulers": [80] },
+  "search.exclude": { "**/*.pilhum": true }
+}
+"""
+
+# If Cursor detected (additionally):
+create.if_cursor: .cursor/rules
+cursor.rules.content: "See CLAUDE.pil at project root — it is the authoritative context file."
+
+## STEP 5 — PRINT SUMMARY
+
+print.after_scaffold: """
+  PIL project scaffold complete.
+
+  Files created:
+    CLAUDE.pil        — AI memory + project rules (read this first)
+    changelog.pil     — append-only change log (AI maintains automatically)
+    bugfixlog.pil     — append-only bug fix log (AI maintains automatically)
+    pil-viewer.html   — open in browser, drag .pil files onto it
+
+  How it works:
+    The AI reads CLAUDE.pil at the start of every session.
+    Every code change → one line appended to changelog.pil.
+    Every bug fix → one entry appended to bugfixlog.pil.
+    End of session → decisions compressed back into CLAUDE.pil.
+
+  pil-viewer.html:
+    Open in any browser. No server needed.
+    Drag changelog.pil or bugfixlog.pil onto it.
+    Click "✦ generate .pilhum" to get a human-readable summary
+    (requires Anthropic API key — entered once, stored locally).
+
+  PIL spec + source:
+    https://github.com/concidea/pil
+"""
+
+## META
+
+FIXED: never: ask_more_than_2_questions_upfront
+FIXED: never: create_placeholder_code
+FIXED: never: skip_changelog_entry_for_any_file_created
